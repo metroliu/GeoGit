@@ -1,10 +1,15 @@
 package org.geogit.storage.hbase;
 
+import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.MasterNotRunningException;
+import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
+import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.geogit.api.ObjectId;
 import org.geogit.api.RevCommit;
@@ -25,18 +30,15 @@ import com.google.inject.Inject;
 
 public class HBaseObjectDatabase implements ObjectDatabase {
     
-    
+    /* A non-instantiable class that manages creation of HConnections.*/
     private final HConnectionManager manager;
     
-    protected final ConfigDatabase config;
+    private HConnection connection;
     
-    /*
-     * @admin: To administer HBase, create and drop tables, list and alter tables, use HBaseAdmin.
-     * @hbConfig: Provides access to configuration parameters
-     */
-    private HBaseAdmin admin = null;
+    protected ConfigDatabase config;
+    // To administer HBase, create and drop tables, list and alter tables, use HBaseAdmin.
+    private HBaseAdmin client = null;
     
-    private Configuration hbConfig = null;
     
     /* from mongodb */
     /*
@@ -48,45 +50,75 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     private String collectionName;
 
+    
     @Inject
-    public HBaseObjectDatabase(ConfigDatabase config, HConnectionManager manager) {
-        this(config, manager, "objects");
+    public HBaseObjectDatabase(ConfigDatabase config, HConnectionManager manager, HConnection connection) {
+        this(config, manager, connection, "objects");
     }
 
-    HBaseObjectDatabase(ConfigDatabase config, HConnectionManager manager, String collectionName) {
+    HBaseObjectDatabase(ConfigDatabase config, HConnectionManager manager, HConnection connection, String collectionName) {
         this.config = config;
         this.manager = manager;
+        this.connection = connection;
         this.collectionName = collectionName;
     }
 
+    
     @Override
     public void open() {
-        // TODO Auto-generated method stub
-
+        if (client != null) {
+            return;
+        }
+        
+        String uri = config.get("hbase.uri").get();
+        String database = config.get("hbase.database").get();
+        Configuration hbConfig = HBaseConfiguration.create();
+        hbConfig.set("someValue", uri);
+        hbConfig.set("someValue", database);
+        
+        try {
+            connection = manager.createConnection(hbConfig);
+            client = new HBaseAdmin(connection);
+        } catch (ZooKeeperConnectionException e) {
+            e.printStackTrace();
+        } catch (MasterNotRunningException e){
+            e.printStackTrace();
+        }
+    }
+    
+    @Override
+    public synchronized boolean isOpen() {
+        return client != null;
     }
 
     @Override
     public void configure() throws RepositoryConnectionException {
-        // TODO Auto-generated method stub
-
+        RepositoryConnectionException.StorageType.OBJECT.configure(config, "hbase", "0.94.17");
+        String uri = config.get("hbase.uri").or(config.getGlobal("hbase.uri"))
+                .or("hbase://localhost:2181/");
+        String database = config.get("hbase.database").or(config.getGlobal("hbase.database"))
+                .or("geogit");
+        config.put("hbase.uri", uri);
+        config.put("hbase.database", database);
     }
 
     @Override
     public void checkConfig() throws RepositoryConnectionException {
-        // TODO Auto-generated method stub
-
-    }
-
-    @Override
-    public boolean isOpen() {
-        // TODO Auto-generated method stub
-        return false;
+        RepositoryConnectionException.StorageType.OBJECT.verify(config, "hbase", "0.94.17");
     }
 
     @Override
     public void close() {
-        // TODO Auto-generated method stub
-
+        if (client != null) {
+            try {
+                connection.close();
+                client.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            
+        }
+        client = null;
     }
 
     @Override
