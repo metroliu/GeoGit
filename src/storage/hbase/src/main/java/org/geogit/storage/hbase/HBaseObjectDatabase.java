@@ -1,6 +1,7 @@
 package org.geogit.storage.hbase;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -11,6 +12,11 @@ import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
+import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.ResultScanner;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.geogit.api.ObjectId;
 import org.geogit.api.RevCommit;
 import org.geogit.api.RevFeature;
@@ -27,6 +33,9 @@ import org.geogit.storage.ObjectSerializingFactory;
 import org.geogit.storage.datastream.DataStreamSerializationFactory;
 
 import com.google.inject.Inject;
+import com.mongodb.BasicDBObject;
+import com.mongodb.DBCursor;
+import com.mongodb.DBObject;
 
 public class HBaseObjectDatabase implements ObjectDatabase {
     
@@ -62,7 +71,6 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         this.connection = connection;
         this.collectionName = collectionName;
     }
-
     
     @Override
     public void open() {
@@ -73,8 +81,8 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         String uri = config.get("hbase.uri").get();
         String database = config.get("hbase.database").get();
         Configuration hbConfig = HBaseConfiguration.create();
-        hbConfig.set("someValue", uri);
-        hbConfig.set("someValue", database);
+        // hbConfig.set("someValue", uri);
+        // hbConfig.set("someValue", database);
         
         try {
             connection = manager.createConnection(hbConfig);
@@ -116,21 +124,50 @@ public class HBaseObjectDatabase implements ObjectDatabase {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            
         }
         client = null;
     }
 
     @Override
     public boolean exists(ObjectId id) {
-        // TODO Auto-generated method stub
-        return false;
+        Scan s = new Scan();
+        s.addColumn(Bytes.toBytes("family"), Bytes.toBytes("qualifier")); // replaced with ObjectId id 
+        
+        HTable table;
+        Result rr = null;
+        ResultScanner scanner;
+        try {
+            table = new HTable(Bytes.toBytes("geogitTable"), connection); // replaced with the name of the table
+            scanner = table.getScanner(s);
+            rr = scanner.next();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally{
+            scanner.close();
+        }
+        
+        return (rr != null);
     }
 
     @Override
     public List<ObjectId> lookUp(String partialId) {
-        // TODO Auto-generated method stub
-        return null;
+        if (partialId.matches("[a-fA-F0-9]+")) {
+            DBObject regex = new BasicDBObject();
+            regex.put("$regex", "^" + partialId);
+            DBObject query = new BasicDBObject();
+            query.put("oid", regex);
+            DBCursor cursor = collection.find(query);
+            List<ObjectId> ids = new ArrayList<ObjectId>();
+            while (cursor.hasNext()) {
+                DBObject elem = cursor.next();
+                String oid = (String) elem.get("oid");
+                ids.add(ObjectId.valueOf(oid));
+            }
+            return ids;
+        } else {
+            throw new IllegalArgumentException(
+                    "Prefix query must be done with hexadecimal values only");
+        }
     }
 
     @Override
