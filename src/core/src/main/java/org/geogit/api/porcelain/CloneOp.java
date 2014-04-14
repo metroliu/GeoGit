@@ -123,7 +123,7 @@ public class CloneOp extends AbstractGeoGitOp<Void> {
         }
 
         getProgressListener().started();
-        getProgressListener().progress(0.f);
+        getProgressListener().setProgress(0.f);
 
         // Set up origin
         Remote remote = command(RemoteAddOp.class).setName("origin").setURL(repositoryURL)
@@ -163,9 +163,8 @@ public class CloneOp extends AbstractGeoGitOp<Void> {
         command(FetchOp.class).setDepth(depth.or(0)).setProgressListener(subProgress(90.f)).call();
 
         // Set up remote tracking branches
-        final ImmutableSet<Ref> remoteRefs = command(LsRemote.class)
-                .setRemote(Suppliers.ofInstance(Optional.of(remote))).retrieveLocalRefs(true)
-                .call();
+        final ImmutableSet<Ref> remoteRefs = command(LsRemote.class).retrieveTags(false)
+                .setRemote(Suppliers.ofInstance(Optional.of(remote))).call();
 
         boolean emptyRepo = true;
 
@@ -177,12 +176,11 @@ public class CloneOp extends AbstractGeoGitOp<Void> {
             if (remoteRef instanceof SymRef) {
                 continue;
             }
-            if (!command(RefParse.class).setName(Ref.HEADS_PREFIX + remoteRef.localName()).call()
-                    .isPresent()) {
+            if (!command(RefParse.class).setName(Ref.HEADS_PREFIX + branchName).call().isPresent()) {
                 command(BranchCreateOp.class).setName(branchName)
                         .setSource(remoteRef.getObjectId().toString()).call();
             } else {
-                command(UpdateRef.class).setName(Ref.HEADS_PREFIX + remoteRef.localName())
+                command(UpdateRef.class).setName(Ref.HEADS_PREFIX + branchName)
                         .setNewValue(remoteRef.getObjectId()).call();
             }
 
@@ -194,7 +192,7 @@ public class CloneOp extends AbstractGeoGitOp<Void> {
                     .setName("branches." + branchName + ".merge")
                     .setValue(Ref.HEADS_PREFIX + remoteRef.localName()).call();
         }
-        getProgressListener().progress(95.f);
+        getProgressListener().setProgress(95.f);
 
         if (!emptyRepo) {
             // checkout branch
@@ -204,13 +202,14 @@ public class CloneOp extends AbstractGeoGitOp<Void> {
                 // checkout the head
                 final Optional<Ref> currRemoteHead = command(RefParse.class).setName(
                         Ref.REMOTES_PREFIX + remote.getName() + "/" + Ref.HEAD).call();
-                Preconditions.checkState(currRemoteHead.isPresent(), "No remote HEAD.");
-                Preconditions.checkState(currRemoteHead.get() instanceof SymRef,
-                        "Remote HEAD is detached." + currRemoteHead.get().toString());
-                final SymRef remoteHeadRef = (SymRef) currRemoteHead.get();
-                final String currentBranch = Ref.localName(remoteHeadRef.getTarget());
+                if (currRemoteHead.isPresent() && currRemoteHead.get() instanceof SymRef) {
+                    final SymRef remoteHeadRef = (SymRef) currRemoteHead.get();
+                    final String currentBranch = Ref.localName(remoteHeadRef.getTarget());
+                    command(CheckoutOp.class).setForce(true).setSource(currentBranch).call();
+                } else {
+                    // just leave at default; should be master since we just initialized the repo.
+                }
 
-                command(CheckoutOp.class).setForce(true).setSource(currentBranch).call();
 
             }
         }

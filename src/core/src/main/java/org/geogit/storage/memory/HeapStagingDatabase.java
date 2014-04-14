@@ -16,7 +16,6 @@ import org.geogit.repository.RepositoryConnectionException;
 import org.geogit.storage.AbstractObjectDatabase;
 import org.geogit.storage.ForwardingStagingDatabase;
 import org.geogit.storage.ObjectDatabase;
-import org.geogit.storage.ObjectSerializingFactory;
 
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
@@ -40,9 +39,8 @@ public class HeapStagingDatabase extends ForwardingStagingDatabase {
      *        to for objects not found here
      */
     @Inject
-    public HeapStagingDatabase(final ObjectDatabase repositoryDb,
-            final ObjectSerializingFactory serialFactory) {
-        super(ofInstance(repositoryDb), ofInstance(new HeapObjectDatabse(serialFactory)));
+    public HeapStagingDatabase(final ObjectDatabase repositoryDb) {
+        super(ofInstance(repositoryDb), ofInstance(new HeapObjectDatabse()));
     }
 
     @Override
@@ -152,5 +150,14 @@ public class HeapStagingDatabase extends ForwardingStagingDatabase {
             namespace = "root";
         }
         conflicts.remove(namespace);
+    }
+
+    @Override
+    public boolean hasConflicts(String namespace) {
+        if (namespace == null) {
+            namespace = "root";
+        }
+        Map<String, Conflict> conflicts = this.conflicts.get(namespace);
+        return conflicts != null && !conflicts.isEmpty();
     }
 }

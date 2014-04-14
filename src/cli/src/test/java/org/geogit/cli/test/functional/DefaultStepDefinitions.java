@@ -56,6 +56,8 @@ import org.geogit.api.plumbing.diff.Patch;
 import org.geogit.api.plumbing.diff.PatchSerializer;
 import org.geogit.api.porcelain.MergeConflictsException;
 import org.geogit.api.porcelain.MergeOp;
+import org.geogit.api.porcelain.TagCreateOp;
+import org.geogit.cli.ArgumentTokenizer;
 import org.geogit.repository.Hints;
 import org.geogit.repository.WorkingTree;
 import org.junit.rules.TemporaryFolder;
@@ -113,12 +115,13 @@ public class DefaultStepDefinitions {
         setupGeogit();
     }
 
-    @When("^I run the command \"([^\"]*)\"$")
+    @When("^I run the command \"(.*?)\"$")
     public void I_run_the_command_X(String commandSpec) throws Throwable {
-        String[] args = commandSpec.split(" ");
+        String[] args = ArgumentTokenizer.tokenize(commandSpec);
         File pwd = platform.pwd();
         for (int i = 0; i < args.length; i++) {
             args[i] = args[i].replace("${currentdir}", pwd.getAbsolutePath());
+            args[i] = args[i].replace("\"", "");
         }
         runCommand(args);
     }
@@ -190,6 +193,16 @@ public class DefaultStepDefinitions {
                 .setName(ref).call();
         assertTrue(refValue.isPresent());
         assertEquals(refValue.get().getObjectId(), ObjectId.NULL);
+    }
+
+    @Given("^I have a remote tag called \"([^\"]*)\"$")
+    public void i_have_a_remote_tag_called(String expected) throws Throwable {
+        geogitCLI.getGeogit(Hints.readWrite()) //
+                .command(TagCreateOp.class) //
+                .setName(expected) //
+                .setMessage("Tagged " + expected) //
+                .setCommitId(ObjectId.NULL) //
+                .call();
     }
 
     @Given("^I have an unconfigured repository$")
@@ -265,6 +278,50 @@ public class DefaultStepDefinitions {
 
     @Given("^there is a remote repository$")
     public void there_is_a_remote_repository() throws Throwable {
+        createRemote("remoterepo");
+    }
+
+    @Given("^there is a remote repository with blank spaces$")
+    public void there_is_a_remote_repository_with_blank_spaces() throws Throwable {
+        createRemote("remote repo");
+    }
+
+    private void createRemote(String name) throws Throwable {
+        I_am_in_an_empty_directory();
+
+        final File currDir = platform.pwd();
+
+        List<String> output = runAndParseCommand(true, "init", name);
+
+        assertEquals(output.toString(), 1, output.size());
+        assertNotNull(output.get(0));
+        assertTrue(output.get(0), output.get(0).startsWith("Initialized"));
+
+        final File remoteRepo = new File(currDir, name);
+        GlobalState.remoteRepo = remoteRepo;
+        platform.setWorkingDir(remoteRepo);
+        setupGeogit();
+        runCommand(true, "config", "--global", "user.name", "John Doe");
+        runCommand(true, "config", "--global", "user.email", "JohnDoe@example.com");
+        insertAndAdd(points1);
+        runCommand(true, "commit -m Commit1");
+        runCommand(true, "branch -c branch1");
+        insertAndAdd(points2);
+        runCommand(true, "commit -m Commit2");
+        insertAndAdd(points3);
+        runCommand(true, "commit -m Commit3");
+        runCommand(true, "checkout master");
+        insertAndAdd(lines1);
+        runCommand(true, "commit -m Commit4");
+        insertAndAdd(lines2);
+        runCommand(true, "commit -m Commit5");
+
+        platform.setWorkingDir(currDir);
+        setupGeogit();
+    }
+
+    @Given("^there is a remote repository with a tag named \"([^\"]*)\"$")
+    public void there_is_a_remote_repository_with_a_tag_named(String tagName) throws Throwable {
         I_am_in_an_empty_directory();
 
         final File currDir = platform.pwd();
@@ -293,6 +350,7 @@ public class DefaultStepDefinitions {
         runCommand(true, "commit -m Commit4");
         insertAndAdd(lines2);
         runCommand(true, "commit -m Commit5");
+        runCommand(true, "tag " + tagName + " -m Created_" + tagName + "");
 
         platform.setWorkingDir(currDir);
         setupGeogit();

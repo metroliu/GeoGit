@@ -40,7 +40,7 @@ import org.geogit.storage.BulkOpListener;
 import org.geogit.storage.ConfigDatabase;
 import org.geogit.storage.ObjectDatabase;
 import org.geogit.storage.ObjectReader;
-import org.geogit.storage.ObjectSerializingFactory;
+import org.geogit.storage.datastream.DataStreamSerializationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,17 +111,14 @@ public class JEObjectDatabase extends AbstractObjectDatabase implements ObjectDa
     private final String envName;
 
     @Inject
-    public JEObjectDatabase(final ConfigDatabase configDB,
-            final ObjectSerializingFactory serialFactory, final EnvironmentBuilder envProvider,
+    public JEObjectDatabase(final ConfigDatabase configDB, final EnvironmentBuilder envProvider,
             final Hints hints) {
-        this(configDB, serialFactory, envProvider, hints.getBoolean(Hints.OBJECTS_READ_ONLY),
-                "objects");
+        this(configDB, envProvider, hints.getBoolean(Hints.OBJECTS_READ_ONLY), "objects");
     }
 
-    public JEObjectDatabase(final ConfigDatabase configDB,
-            final ObjectSerializingFactory serialFactory, final EnvironmentBuilder envProvider,
+    public JEObjectDatabase(final ConfigDatabase configDB, final EnvironmentBuilder envProvider,
             final boolean readOnly, final String envName) {
-        super(serialFactory);
+        super(DataStreamSerializationFactory.INSTANCE);
         this.configDB = configDB;
         this.envProvider = envProvider;
         this.readOnly = readOnly;
@@ -846,7 +843,12 @@ public class JEObjectDatabase extends AbstractObjectDatabase implements ObjectDa
         if (transactional) {
             TransactionConfig txConfig = new TransactionConfig();
             txConfig.setReadUncommitted(true);
-            txConfig.setDurability(Durability.COMMIT_WRITE_NO_SYNC);
+            Optional<String> durability = configDB.get("bdbje.object_durability");
+            if ("safe".equals(durability.orNull())) {
+                txConfig.setDurability(Durability.COMMIT_SYNC);
+            } else {
+                txConfig.setDurability(Durability.COMMIT_WRITE_NO_SYNC);
+            }
             Transaction transaction = env.beginTransaction(null, txConfig);
             return transaction;
         }

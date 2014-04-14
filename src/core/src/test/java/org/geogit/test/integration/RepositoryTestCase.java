@@ -149,12 +149,11 @@ public abstract class RepositoryTestCase extends Assert {
         }
 
         setup = true;
-        Logging.ALL.forceMonolineConsoleOutput();
         doSetUp();
     }
 
     protected final void doSetUp() throws IOException, SchemaException, ParseException, Exception {
-        envHome = repositoryTempFolder.getRoot();
+        envHome = repositoryTempFolder.newFolder("repo");
 
         injector = createInjector();
 
