@@ -81,8 +81,8 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         String uri = config.get("hbase.uri").get();
         String database = config.get("hbase.database").get();
         Configuration hbConfig = HBaseConfiguration.create();
-        // hbConfig.set("someValue", uri);
-        // hbConfig.set("someValue", database);
+        hbConfig.set("someValue", uri);
+        hbConfig.set("someValue", database);
         
         try {
             connection = manager.createConnection(hbConfig);
@@ -92,6 +92,8 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         } catch (MasterNotRunningException e){
             e.printStackTrace();
         }
+        
+        
     }
     
     @Override
@@ -101,7 +103,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     @Override
     public void configure() throws RepositoryConnectionException {
-        RepositoryConnectionException.StorageType.OBJECT.configure(config, "hbase", "0.94.17");
+        RepositoryConnectionException.StorageType.OBJECT.configure(config, "hbase", "0.1");
         String uri = config.get("hbase.uri").or(config.getGlobal("hbase.uri"))
                 .or("hbase://localhost:2181/");
         String database = config.get("hbase.database").or(config.getGlobal("hbase.database"))
@@ -112,7 +114,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     @Override
     public void checkConfig() throws RepositoryConnectionException {
-        RepositoryConnectionException.StorageType.OBJECT.verify(config, "hbase", "0.94.17");
+        RepositoryConnectionException.StorageType.OBJECT.verify(config, "hbase", "0.1");
     }
 
     @Override
@@ -131,7 +133,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
     @Override
     public boolean exists(ObjectId id) {
         Scan s = new Scan();
-        s.addColumn(Bytes.toBytes("family"), Bytes.toBytes("qualifier")); // replaced with ObjectId id 
+        s.addColumn(Bytes.toBytes("family"), Bytes.toBytes("qualifier")); // replaced "qualifier" with ObjectId id
         
         HTable table;
         Result rr = null;
@@ -151,23 +153,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     @Override
     public List<ObjectId> lookUp(String partialId) {
-        if (partialId.matches("[a-fA-F0-9]+")) {
-            DBObject regex = new BasicDBObject();
-            regex.put("$regex", "^" + partialId);
-            DBObject query = new BasicDBObject();
-            query.put("oid", regex);
-            DBCursor cursor = collection.find(query);
-            List<ObjectId> ids = new ArrayList<ObjectId>();
-            while (cursor.hasNext()) {
-                DBObject elem = cursor.next();
-                String oid = (String) elem.get("oid");
-                ids.add(ObjectId.valueOf(oid));
-            }
-            return ids;
-        } else {
-            throw new IllegalArgumentException(
-                    "Prefix query must be done with hexadecimal values only");
-        }
+        
     }
 
     @Override
