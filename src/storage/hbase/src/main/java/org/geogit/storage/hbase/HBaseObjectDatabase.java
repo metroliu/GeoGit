@@ -131,7 +131,10 @@ public class HBaseObjectDatabase implements ObjectDatabase {
          * other relevant three tables: 'geogit-conflicts', 'geogit-graph', 'geogit-staging'
          */
         String objectsTableName = database+"-objects";
+        
         try{
+            table = new HTable(hbConfig, Bytes.toBytes(objectsTableName));
+            
             if (client.tableExists(objectsTableName)) {
                 // System.out.println(" table 'geogit-objects' already ");
             } else {
@@ -139,7 +142,6 @@ public class HBaseObjectDatabase implements ObjectDatabase {
                 HTableDescriptor tableDesc = new HTableDescriptor(objectsTableName);
                 tableDesc.addFamily(new HColumnDescriptor("serialized_object"));
                 client.createTable(tableDesc);
-                table = new HTable(hbConfig, Bytes.toBytes(objectsTableName));
             }
         } catch( IOException e ){
             e.printStackTrace();
