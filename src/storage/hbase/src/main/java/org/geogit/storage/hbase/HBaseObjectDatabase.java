@@ -17,8 +17,6 @@ import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HConnection;
-import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
@@ -51,12 +49,18 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.inject.Inject;
 
+/**
+ * An Object database that uses a HBase server for persistence.
+ * 
+ * @see https://hbase.apache.org
+ */
+
 public class HBaseObjectDatabase implements ObjectDatabase {
     
 
     // private final HConnectionManager manager;
     
-    private HConnection connection;
+    // private HConnection connection;
     
     protected ConfigDatabase config;
 
@@ -70,13 +74,12 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     
     @Inject
-    public HBaseObjectDatabase(ConfigDatabase config, HConnection connection) {
-        this(config, connection, "objects");
+    public HBaseObjectDatabase(ConfigDatabase config) {
+        this(config, "objects");
     }
 
-    HBaseObjectDatabase(ConfigDatabase config, HConnection connection, String collectionName) {
+    HBaseObjectDatabase(ConfigDatabase config, String collectionName) {
         this.config = config;
-        this.connection = connection;
         this.collectionName = collectionName;
     }
     
@@ -114,8 +117,8 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         // hbConfig.set("someValue", database);
         
         try {
-            connection = HConnectionManager.createConnection(hbConfig);
-            client = new HBaseAdmin(connection);
+            // connection = HConnectionManager.createConnection(hbConfig);
+            client = new HBaseAdmin(hbConfig);
         } catch (ZooKeeperConnectionException e) {
             e.printStackTrace();
         } catch (MasterNotRunningException e){
@@ -125,7 +128,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         /*
          * in hbase, we can't create multiples databases inside the same cluster,
          * so use prefixes for table names to separate a set of tables from another set
-         * other relevant four tables: 'geogit-conflicts', 'geogit-graph', 'geogit-staging'
+         * other relevant three tables: 'geogit-conflicts', 'geogit-graph', 'geogit-staging'
          */
         String objectsTableName = database+"-objects";
         try{
@@ -136,7 +139,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
                 HTableDescriptor tableDesc = new HTableDescriptor(objectsTableName);
                 tableDesc.addFamily(new HColumnDescriptor("serialized_object"));
                 client.createTable(tableDesc);
-                table = new HTable(Bytes.toBytes(objectsTableName), connection);
+                table = new HTable(hbConfig, Bytes.toBytes(objectsTableName));
             }
         } catch( IOException e ){
             e.printStackTrace();
@@ -169,7 +172,6 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         if (client != null) {
             try {
                 client.close();
-                connection.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }

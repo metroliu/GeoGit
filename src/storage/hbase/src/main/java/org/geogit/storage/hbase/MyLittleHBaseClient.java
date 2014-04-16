@@ -35,14 +35,14 @@ public class MyLittleHBaseClient {
     // the "myLittleHBaseTable" table.
     
     HConnectionManager manager = null;
-    HConnection connection;
+    //HConnection connection;
     HBaseAdmin client = null;
     HTable table = null;
     
     Configuration hbConfig = HBaseConfiguration.create();
     try {
-        connection = manager.createConnection(hbConfig);
-        client = new HBaseAdmin(connection);
+        //connection = manager.createConnection(hbConfig);
+        client = new HBaseAdmin(hbConfig);
     } catch (ZooKeeperConnectionException e) {
         throw e;
     } catch (MasterNotRunningException e){
@@ -50,6 +50,8 @@ public class MyLittleHBaseClient {
     }
     
     String objectsTableName = "rickie-test";
+    table = new HTable(hbConfig, Bytes.toBytes(objectsTableName)); 
+    
     try{
         if (client.tableExists(objectsTableName)) {
             // System.out.println(" table 'geogit-objects' already ");
@@ -58,7 +60,7 @@ public class MyLittleHBaseClient {
             HTableDescriptor tableDesc = new HTableDescriptor(objectsTableName);
             tableDesc.addFamily(new HColumnDescriptor("serialized_object"));
             client.createTable(tableDesc);
-            table = new HTable(Bytes.toBytes(objectsTableName), connection); 
+            
         }
     } catch( IOException e ){
         throw e;
@@ -76,7 +78,7 @@ public class MyLittleHBaseClient {
     // adorn it by setting the names of columns you want to update on the row,
     // the timestamp to use in your update, etc.If no timestamp, the server
     // applies current time to the edits.
-    Put p = new Put(Bytes.toBytes("oid_1"));
+    Put p = new Put(Bytes.toBytes("oid_3"));
 
     // To set the value you'd like to update in the row 'myLittleRow', specify
     // the column family, column qualifier, and value of the table cell you'd
