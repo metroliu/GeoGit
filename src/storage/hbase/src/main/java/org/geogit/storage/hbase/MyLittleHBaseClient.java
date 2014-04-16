@@ -4,7 +4,14 @@ import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.MasterNotRunningException;
+import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.HBaseAdmin;
+import org.apache.hadoop.hbase.client.HConnection;
+import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
@@ -21,12 +28,45 @@ public class MyLittleHBaseClient {
     // When you create a HBaseConfiguration, it reads in whatever you've set
     // into your hbase-site.xml and in hbase-default.xml, as long as these can
     // be found on the CLASSPATH
-    Configuration config = HBaseConfiguration.create();
+      
     //config.addResource("/Users/apple/Documents/tools/hbase-0.94.17/conf/hbase-site.xml");
 
     // This instantiates an HTable object that connects you to
     // the "myLittleHBaseTable" table.
-    HTable table = new HTable(config, "myLittleHBaseTable");
+    
+    HConnectionManager manager = null;
+    HConnection connection;
+    HBaseAdmin client = null;
+    HTable table = null;
+    
+    Configuration hbConfig = HBaseConfiguration.create();
+    try {
+        connection = manager.createConnection(hbConfig);
+        client = new HBaseAdmin(connection);
+    } catch (ZooKeeperConnectionException e) {
+        throw e;
+    } catch (MasterNotRunningException e){
+        throw e;
+    }
+    
+    String objectsTableName = "rickie-test";
+    try{
+        if (client.tableExists(objectsTableName)) {
+            // System.out.println(" table 'geogit-objects' already ");
+        } else {
+            
+            HTableDescriptor tableDesc = new HTableDescriptor(objectsTableName);
+            tableDesc.addFamily(new HColumnDescriptor("serialized_object"));
+            client.createTable(tableDesc);
+            table = new HTable(Bytes.toBytes(objectsTableName), connection); 
+        }
+    } catch( IOException e ){
+        throw e;
+    }
+    
+    
+    
+    // HTable table = new HTable(config, "rickie-test");
 
     // To add to a row, use Put.  A Put constructor takes the name of the row
     // you want to insert into as a byte array.  In HBase, the Bytes class has
@@ -36,7 +76,7 @@ public class MyLittleHBaseClient {
     // adorn it by setting the names of columns you want to update on the row,
     // the timestamp to use in your update, etc.If no timestamp, the server
     // applies current time to the edits.
-    Put p = new Put(Bytes.toBytes("myLittleRow"));
+    Put p = new Put(Bytes.toBytes("oid_1"));
 
     // To set the value you'd like to update in the row 'myLittleRow', specify
     // the column family, column qualifier, and value of the table cell you'd
@@ -44,8 +84,8 @@ public class MyLittleHBaseClient {
     // schema.  The qualifier can be anything.  All must be specified as byte
     // arrays as hbase is all about byte arrays.  Lets pretend the table
     // 'myLittleHBaseTable' was created with a family 'myLittleFamily'.
-    p.add(Bytes.toBytes("myLittleFamily"), Bytes.toBytes("someQualifier"),
-      Bytes.toBytes("Some Value"));
+    p.add(Bytes.toBytes("serialized_object"), Bytes.toBytes(""),
+      Bytes.toBytes("4238749823KHDAHDKAWHDKUWAHDKAUHIH"));
 
     // Once you've adorned your Put instance with all the updates you want to
     // make, to commit it do the following (The HTable#put method takes the

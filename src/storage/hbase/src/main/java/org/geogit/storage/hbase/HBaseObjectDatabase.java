@@ -1,21 +1,33 @@
 package org.geogit.storage.hbase;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.ZooKeeperConnectionException;
+import org.apache.hadoop.hbase.client.Delete;
+import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
+import org.apache.hadoop.hbase.filter.Filter;
+import org.apache.hadoop.hbase.filter.RowFilter;
+import org.apache.hadoop.hbase.filter.SubstringComparator;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.geogit.api.ObjectId;
 import org.geogit.api.RevCommit;
@@ -30,30 +42,27 @@ import org.geogit.storage.ConfigDatabase;
 import org.geogit.storage.ObjectDatabase;
 import org.geogit.storage.ObjectInserter;
 import org.geogit.storage.ObjectSerializingFactory;
+import org.geogit.storage.ObjectWriter;
 import org.geogit.storage.datastream.DataStreamSerializationFactory;
 
+import com.google.common.base.Functions;
+import com.google.common.collect.AbstractIterator;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.google.inject.Inject;
-import com.mongodb.BasicDBObject;
-import com.mongodb.DBCursor;
-import com.mongodb.DBObject;
 
 public class HBaseObjectDatabase implements ObjectDatabase {
     
-    /* A non-instantiable class that manages creation of HConnections.*/
-    private final HConnectionManager manager;
+
+    // private final HConnectionManager manager;
     
     private HConnection connection;
     
     protected ConfigDatabase config;
-    // To administer HBase, create and drop tables, list and alter tables, use HBaseAdmin.
+
     private HBaseAdmin client = null;
     
-    
-    /* from mongodb */
-    /*
-     * private MongoClient client = null; protected DB db = null; protected DBCollection collection
-     * = null;
-     */
+    protected HTable table;
     
     protected ObjectSerializingFactory serializers = new DataStreamSerializationFactory();
 
@@ -61,15 +70,35 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     
     @Inject
-    public HBaseObjectDatabase(ConfigDatabase config, HConnectionManager manager, HConnection connection) {
-        this(config, manager, connection, "objects");
+    public HBaseObjectDatabase(ConfigDatabase config, HConnection connection) {
+        this(config, connection, "objects");
     }
 
-    HBaseObjectDatabase(ConfigDatabase config, HConnectionManager manager, HConnection connection, String collectionName) {
+    HBaseObjectDatabase(ConfigDatabase config, HConnection connection, String collectionName) {
         this.config = config;
-        this.manager = manager;
         this.connection = connection;
         this.collectionName = collectionName;
+    }
+    
+    private RevObject fromBytes(ObjectId id, byte[] buffer) {
+        ByteArrayInputStream byteStream = new ByteArrayInputStream(buffer);
+        RevObject result = serializers.createObjectReader().read(id, byteStream);
+        return result;
+    }
+
+    private byte[] toBytes(RevObject object) {
+        ObjectWriter<RevObject> writer = serializers.createObjectWriter(object.getType());
+        ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+        try {
+            writer.write(object, byteStream);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return byteStream.toByteArray();
+    }
+    
+    protected String getCollectionName() {
+        return collectionName;
     }
     
     @Override
@@ -78,14 +107,14 @@ public class HBaseObjectDatabase implements ObjectDatabase {
             return;
         }
         
-        String uri = config.get("hbase.uri").get();
+        // String uri = config.get("hbase.uri").get();
         String database = config.get("hbase.database").get();
         Configuration hbConfig = HBaseConfiguration.create();
-        hbConfig.set("someValue", uri);
-        hbConfig.set("someValue", database);
+        // hbConfig.set("someValue", uri);
+        // hbConfig.set("someValue", database);
         
         try {
-            connection = manager.createConnection(hbConfig);
+            connection = HConnectionManager.createConnection(hbConfig);
             client = new HBaseAdmin(connection);
         } catch (ZooKeeperConnectionException e) {
             e.printStackTrace();
@@ -93,7 +122,25 @@ public class HBaseObjectDatabase implements ObjectDatabase {
             e.printStackTrace();
         }
         
-        
+        /*
+         * in hbase, we can't create multiples databases inside the same cluster,
+         * so use prefixes for table names to separate a set of tables from another set
+         * other relevant four tables: 'geogit-conflicts', 'geogit-graph', 'geogit-staging'
+         */
+        String objectsTableName = database+"-objects";
+        try{
+            if (client.tableExists(objectsTableName)) {
+                // System.out.println(" table 'geogit-objects' already ");
+            } else {
+                
+                HTableDescriptor tableDesc = new HTableDescriptor(objectsTableName);
+                tableDesc.addFamily(new HColumnDescriptor("serialized_object"));
+                client.createTable(tableDesc);
+                table = new HTable(Bytes.toBytes(objectsTableName), connection);
+            }
+        } catch( IOException e ){
+            e.printStackTrace();
+        }
     }
     
     @Override
@@ -121,8 +168,8 @@ public class HBaseObjectDatabase implements ObjectDatabase {
     public void close() {
         if (client != null) {
             try {
-                connection.close();
                 client.close();
+                connection.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -132,137 +179,228 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     @Override
     public boolean exists(ObjectId id) {
-        Scan s = new Scan();
-        s.addColumn(Bytes.toBytes("family"), Bytes.toBytes("qualifier")); // replaced "qualifier" with ObjectId id
+        Get get = new Get(Bytes.toBytes(id.toString()));
+        Result result = null;
         
-        HTable table;
-        Result rr = null;
-        ResultScanner scanner;
         try {
-            table = new HTable(Bytes.toBytes("geogitTable"), connection); // replaced with the name of the table
-            scanner = table.getScanner(s);
-            rr = scanner.next();
+            result = table.get(get);
         } catch (IOException e) {
             e.printStackTrace();
-        } finally{
-            scanner.close();
-        }
+        } 
         
-        return (rr != null);
+        return !(result.isEmpty());
     }
 
+    @SuppressWarnings("finally")
     @Override
     public List<ObjectId> lookUp(String partialId) {
-        
+        if (partialId.matches("[a-fA-F0-9]+")) {
+            
+            Scan s = new Scan();
+            Filter f = new RowFilter(CompareOp.EQUAL, new SubstringComparator(partialId));
+            s.setFilter(f);
+            ResultScanner rs = null;
+            List<ObjectId> ids = new ArrayList<ObjectId>();
+            
+            try {
+                rs = table.getScanner(s);
+                
+                for(Result r : rs){
+                    String rowKey = Bytes.toString(r.getRow());
+                    ids.add(ObjectId.valueOf(rowKey));
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally{
+                rs.close();
+                return ids;
+            }
+            
+        } else {
+            throw new IllegalArgumentException(
+                    "Prefix query must be done with hexadecimal values only");
+        }
     }
 
     @Override
     public RevObject get(ObjectId id) throws IllegalArgumentException {
-        // TODO Auto-generated method stub
-        return null;
+        RevObject result = getIfPresent(id);
+        if (result != null) {
+            return result;
+        } else {
+            throw new NoSuchElementException("No object with id: " + id);
+        }
     }
 
     @Override
-    public <T extends RevObject> T get(ObjectId id, Class<T> type) throws IllegalArgumentException {
-        // TODO Auto-generated method stub
-        return null;
+    public <T extends RevObject> T get(ObjectId id, Class<T> clazz) {
+        return clazz.cast(get(id));
     }
 
     @Override
     public RevObject getIfPresent(ObjectId id) {
-        // TODO Auto-generated method stub
+        
+        Get get = new Get(Bytes.toBytes(id.toString()));
+        Scan s = new Scan(get);
+        ResultScanner scanner = null;
+        
+        try {
+            scanner = table.getScanner(s);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        
+        for (Result rr : scanner) {
+            return fromBytes(id, rr.getValue(Bytes.toBytes("serialized_object"),
+                    Bytes.toBytes(""))); // no qualifier 
+        }
         return null;
     }
 
     @Override
-    public <T extends RevObject> T getIfPresent(ObjectId id, Class<T> type)
+    public <T extends RevObject> T getIfPresent(ObjectId id, Class<T> clazz)
             throws IllegalArgumentException {
-        // TODO Auto-generated method stub
-        return null;
+        return clazz.cast(getIfPresent(id));
     }
 
     @Override
     public RevTree getTree(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
+        return get(id, RevTree.class);
     }
 
     @Override
     public RevFeature getFeature(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
+        return get(id, RevFeature.class);
     }
 
     @Override
     public RevFeatureType getFeatureType(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
+        return get(id, RevFeatureType.class);
     }
 
     @Override
     public RevCommit getCommit(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
+        return get(id, RevCommit.class);
     }
 
     @Override
     public RevTag getTag(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
+        return get(id, RevTag.class);
     }
 
     @Override
-    public boolean put(RevObject object) {
-        // TODO Auto-generated method stub
-        return false;
+    public boolean put(final RevObject object) {
+        // set oid as rowKey when put
+        Put p = new Put(Bytes.toBytes(object.getId().toString()));
+        // no qualifier
+        p.add(Bytes.toBytes("serialized_object"), Bytes.toBytes(""), toBytes(object));
+        
+        try {
+            table.put(p);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
     }
 
     @Override
     public ObjectInserter newObjectInserter() {
-        // TODO Auto-generated method stub
-        return null;
+        return new ObjectInserter(this);
     }
 
     @Override
     public boolean delete(ObjectId objectId) {
-        // TODO Auto-generated method stub
-        return false;
+        Delete del = new Delete(Bytes.toBytes(objectId.toString()));
+        
+        try {
+            table.delete(del);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
+    }
+    
+    private long deleteChunk(List<ObjectId> ids) {
+        List<String> idStrings = Lists.transform(ids, Functions.toStringFunction());
+        List<Delete> list = new ArrayList<Delete>();
+        
+        for (String id : idStrings) {  
+            Delete del = new Delete(Bytes.toBytes(id));  
+            list.add(del);  
+        }  
+        
+        try {
+            table.delete(list);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 0;
+        }
+        return list.size();
     }
 
     @Override
     public Iterator<RevObject> getAll(Iterable<ObjectId> ids) {
-        // TODO Auto-generated method stub
-        return null;
+        return getAll(ids, BulkOpListener.NOOP_LISTENER);
     }
 
     @Override
-    public Iterator<RevObject> getAll(Iterable<ObjectId> ids, BulkOpListener listener) {
-        // TODO Auto-generated method stub
-        return null;
+    public Iterator<RevObject> getAll(final Iterable<ObjectId> ids, final BulkOpListener listener) {
+        
+        return new AbstractIterator<RevObject>() {
+            final Iterator<ObjectId> queryIds = ids.iterator();
+
+            @Override
+            protected RevObject computeNext() {
+                RevObject obj = null;
+                while (obj == null) {
+                    if (!queryIds.hasNext()) {
+                        return endOfData();
+                    }
+                    ObjectId id = queryIds.next();
+                    obj = getIfPresent(id);
+                    if (obj == null) {
+                        listener.notFound(id);
+                    } else {
+                        listener.found(obj.getId(), null);
+                    }
+                }
+                return obj == null ? endOfData() : obj;
+            }
+        };
     }
 
     @Override
     public void putAll(Iterator<? extends RevObject> objects) {
-        // TODO Auto-generated method stub
-
+        putAll(objects, BulkOpListener.NOOP_LISTENER);
     }
 
     @Override
     public void putAll(Iterator<? extends RevObject> objects, BulkOpListener listener) {
-        // TODO Auto-generated method stub
-
+        while (objects.hasNext()) {
+            RevObject object = objects.next();
+            boolean put = put(object);
+            if (put) {
+                listener.inserted(object.getId(), null);
+            } else {
+                listener.found(object.getId(), null);
+            }
+        }
     }
 
     @Override
     public long deleteAll(Iterator<ObjectId> ids) {
-        // TODO Auto-generated method stub
-        return 0;
+        return deleteAll(ids, BulkOpListener.NOOP_LISTENER);
     }
 
     @Override
     public long deleteAll(Iterator<ObjectId> ids, BulkOpListener listener) {
-        // TODO Auto-generated method stub
-        return 0;
+        Iterator<List<ObjectId>> chunks = Iterators.partition(ids, 500);
+        long count = 0;
+        while (chunks.hasNext()) {
+            count += deleteChunk(chunks.next());
+        }
+        return count;
     }
-
 }
