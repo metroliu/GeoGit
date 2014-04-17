@@ -50,7 +50,7 @@ import com.google.common.collect.Lists;
 import com.google.inject.Inject;
 
 /**
- * An Object database that uses a HBase server for persistence.
+ * An Object database that uses HBase for persistence.
  * 
  * @see https://hbase.apache.org
  */
@@ -114,7 +114,6 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         String database = config.get("hbase.database").get();
         Configuration hbConfig = HBaseConfiguration.create();
         // hbConfig.set("someValue", uri);
-        // hbConfig.set("someValue", database);
         
         try {
             // connection = HConnectionManager.createConnection(hbConfig);
@@ -127,15 +126,14 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         
         /*
          * in hbase, we can't create multiples databases inside the same cluster,
-         * so use prefixes for table names to separate a set of tables from another set
-         * other relevant three tables: 'geogit-conflicts', 'geogit-graph', 'geogit-staging'
+         * so use prefixes for table names to separate a set of tables from another set.
+         * Other relevant three tables: 'geogit-conflicts', 'geogit-graph', 'geogit-staging'
          */
         String objectsTableName = database+"-objects";
         
         try{
-            
             if (client.tableExists(objectsTableName)) {
-                // System.out.println(" table 'geogit-objects' already ");
+                // System.out.println(" table 'geogit-objects' already exists. ");
             } else {
                 HTableDescriptor tableDesc = new HTableDescriptor(objectsTableName);
                 tableDesc.addFamily(new HColumnDescriptor("serialized_object"));
@@ -143,7 +141,6 @@ public class HBaseObjectDatabase implements ObjectDatabase {
             }
             
             table = new HTable(hbConfig, Bytes.toBytes(objectsTableName));
-            
         } catch( IOException e ){
             e.printStackTrace();
         }
@@ -244,7 +241,6 @@ public class HBaseObjectDatabase implements ObjectDatabase {
 
     @Override
     public RevObject getIfPresent(ObjectId id) {
-        
         Get get = new Get(Bytes.toBytes(id.toString()));
         Scan s = new Scan(get);
         ResultScanner scanner = null;
