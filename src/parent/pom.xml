@@ -452,6 +452,7 @@
           <systemPropertyVariables>
             <java.io.tmpdir>${test.tmpDir}</java.io.tmpdir>
           </systemPropertyVariables>
+	  <testFailureIgnore>true</testFailureIgnore>
         </configuration>
       </plugin>
       <plugin>
@@ -567,6 +568,7 @@
         <version>2.16</version>
         <configuration>
           <aggregate>true</aggregate>
+          <testFailureIgnore>true</testFailureIgnore>
         </configuration>
       </plugin>
       <plugin>
