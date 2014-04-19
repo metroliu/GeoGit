@@ -1,32 +1,34 @@
 package org.geogit.storage.hbase;
 
-import java.util.Iterator;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
+import javax.annotation.Nullable;
+
+import org.apache.hadoop.hbase.client.Delete;
+import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.ResultScanner;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.geogit.api.ObjectId;
-import org.geogit.api.RevCommit;
-import org.geogit.api.RevFeature;
-import org.geogit.api.RevFeatureType;
-import org.geogit.api.RevObject;
-import org.geogit.api.RevTag;
-import org.geogit.api.RevTree;
 import org.geogit.api.plumbing.merge.Conflict;
 import org.geogit.repository.RepositoryConnectionException;
-import org.geogit.storage.BulkOpListener;
 import org.geogit.storage.ConfigDatabase;
 import org.geogit.storage.ForwardingStagingDatabase;
 import org.geogit.storage.ObjectDatabase;
-import org.geogit.storage.ObjectInserter;
 import org.geogit.storage.StagingDatabase;
 
 import com.google.common.base.Optional;
-import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 import com.google.inject.Inject;
 
 public class HBbaseStagingDatabase extends ForwardingStagingDatabase implements StagingDatabase {
     
-    // protected DBCollection conflicts;
+    protected HTable conflicts;
 
     private ConfigDatabase config;
 
@@ -39,189 +41,169 @@ public class HBbaseStagingDatabase extends ForwardingStagingDatabase implements 
 
     @Override
     public void open() {
-        // TODO Auto-generated method stub
-
+        super.open();
+        
+        String[] columnFamilies = {"path","ancestor","ours","theirs"};
+        String conflictsTableName = config.get("hbase.database").get()+"-conflicts";
+        try {
+            conflicts = ((HBaseObjectDatabase) super.stagingDb).getCollection(conflictsTableName,columnFamilies);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
     public void configure() throws RepositoryConnectionException {
-        // TODO Auto-generated method stub
-
+        RepositoryConnectionException.StorageType.STAGING.configure(config, "hbase", "0.1");
     }
 
     @Override
     public void checkConfig() throws RepositoryConnectionException {
-        // TODO Auto-generated method stub
-
-    }
-
-    @Override
-    public boolean isOpen() {
-        // TODO Auto-generated method stub
-        return false;
+        RepositoryConnectionException.StorageType.STAGING.verify(config, "hbase", "0.1");
     }
 
     @Override
     public void close() {
-        // TODO Auto-generated method stub
-
+        super.close();
+        try {
+            conflicts.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        conflicts = null;
     }
 
     @Override
-    public boolean exists(ObjectId id) {
-        // TODO Auto-generated method stub
-        return false;
-    }
-
-    @Override
-    public List<ObjectId> lookUp(String partialId) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevObject get(ObjectId id) throws IllegalArgumentException {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public <T extends RevObject> T get(ObjectId id, Class<T> type) throws IllegalArgumentException {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevObject getIfPresent(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public <T extends RevObject> T getIfPresent(ObjectId id, Class<T> type)
-            throws IllegalArgumentException {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevTree getTree(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevFeature getFeature(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevFeatureType getFeatureType(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevCommit getCommit(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public RevTag getTag(ObjectId id) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public boolean put(RevObject object) {
-        // TODO Auto-generated method stub
-        return false;
-    }
-
-    @Override
-    public ObjectInserter newObjectInserter() {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public boolean delete(ObjectId objectId) {
-        // TODO Auto-generated method stub
-        return false;
-    }
-
-    @Override
-    public Iterator<RevObject> getAll(Iterable<ObjectId> ids) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public Iterator<RevObject> getAll(Iterable<ObjectId> ids, BulkOpListener listener) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public void putAll(Iterator<? extends RevObject> objects) {
-        // TODO Auto-generated method stub
-
-    }
-
-    @Override
-    public void putAll(Iterator<? extends RevObject> objects, BulkOpListener listener) {
-        // TODO Auto-generated method stub
-
-    }
-
-    @Override
-    public long deleteAll(Iterator<ObjectId> ids) {
-        // TODO Auto-generated method stub
-        return 0;
-    }
-
-    @Override
-    public long deleteAll(Iterator<ObjectId> ids, BulkOpListener listener) {
-        // TODO Auto-generated method stub
-        return 0;
+    public Optional<Conflict> getConflict(@Nullable String namespace, String path) {
+        String rowkey = namespace;
+        if( namespace == null ){
+            rowkey = "0";
+        }
+        
+        Get get = new Get(Bytes.toBytes(rowkey));
+        get.addFamily(Bytes.toBytes("path"));
+        Scan s = new Scan(get);
+        ResultScanner scanner = null;
+        
+        try {
+            scanner = conflicts.getScanner(s);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        
+        for (Result rr : scanner) {
+            ObjectId ancestor = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ancestor"), Bytes.toBytes(""))) );
+            ObjectId ours = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ours"), Bytes.toBytes(""))) );
+            ObjectId theirs = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("theirs"), Bytes.toBytes(""))) );
+            return Optional.of(new Conflict(path, ancestor, ours, theirs));
+        }
+        
+        return Optional.absent();
     }
 
     @Override
     public boolean hasConflicts(String namespace) {
-        // TODO Auto-generated method stub
-        return false;
+        String rowkey = namespace;
+        if( namespace == null ){
+            rowkey = "0";
+        }
+        
+        Get get = new Get(Bytes.toBytes(rowkey));
+        Result result = null;
+        
+        try {
+            result = conflicts.get(get);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } 
+        
+        return !(result.isEmpty());
     }
 
     @Override
-    public Optional<Conflict> getConflict(String namespace, String path) {
-        // TODO Auto-generated method stub
-        return null;
+    public List<Conflict> getConflicts(@Nullable String namespace, @Nullable String pathFilter) {
+        String rowkey = namespace;
+        if( namespace == null ){
+            rowkey = "0";
+        }
+        
+        Get get = new Get(Bytes.toBytes(rowkey));
+        Scan s = new Scan(get);
+        ResultScanner scanner = null;
+        List<Conflict> results = new ArrayList<Conflict>();
+        
+        try {
+            scanner = conflicts.getScanner(s);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        
+        for (Result rr : scanner) {
+            String fullPath = new String(rr.getValue(Bytes.toBytes("path"), Bytes.toBytes("")));
+            
+            if( fullPath.contains(pathFilter) ){
+                ObjectId ancestor = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ancestor"), Bytes.toBytes(""))) );
+                ObjectId ours = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ours"), Bytes.toBytes(""))) );
+                ObjectId theirs = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("theirs"), Bytes.toBytes(""))) );
+                results.add(new Conflict(fullPath, ancestor, ours, theirs));
+            }
+        }
+        
+        return results;
     }
 
     @Override
-    public List<Conflict> getConflicts(String namespace, String pathFilter) {
-        // TODO Auto-generated method stub
-        return null;
+    public void addConflict(@Nullable String namespace, Conflict conflict) {
+        String rowkey = namespace;
+        if( namespace == null ){
+            rowkey = "0";
+        }
+        // set namespace as rowKey when put
+        Put p = new Put(Bytes.toBytes(rowkey));
+        // no qualifier
+        p.add(Bytes.toBytes("path"), Bytes.toBytes(""), Bytes.toBytes(conflict.getPath()));
+        p.add(Bytes.toBytes("ancestor"), Bytes.toBytes(""), Bytes.toBytes(conflict.getAncestor().toString()));
+        p.add(Bytes.toBytes("ours"), Bytes.toBytes(""), Bytes.toBytes(conflict.getOurs().toString()));
+        p.add(Bytes.toBytes("theirs"), Bytes.toBytes(""), Bytes.toBytes(conflict.getTheirs().toString()));
+        
+        try {
+            conflicts.put(p);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
-    public void addConflict(String namespace, Conflict conflict) {
-        // TODO Auto-generated method stub
-
+    public void removeConflict(@Nullable String namespace, String path) {
+        String rowkey = namespace;
+        if( namespace == null ){
+            rowkey = "0";
+        }
+        
+        Delete del = new Delete(Bytes.toBytes(rowkey));
+        del.deleteColumn(Bytes.toBytes(path), Bytes.toBytes(""));
+        
+        try {
+            conflicts.delete(del);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
-    public void removeConflict(String namespace, String path) {
-        // TODO Auto-generated method stub
-
-    }
-
-    @Override
-    public void removeConflicts(String namespace) {
-        // TODO Auto-generated method stub
-
+    public void removeConflicts(@Nullable String namespace) {
+        String rowkey = namespace;
+        if( namespace == null ){
+            rowkey = "0";
+        }
+        
+        Delete del = new Delete(Bytes.toBytes(rowkey));
+        
+        try {
+            conflicts.delete(del);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
 }
