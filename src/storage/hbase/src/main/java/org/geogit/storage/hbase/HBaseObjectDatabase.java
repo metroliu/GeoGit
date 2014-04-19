@@ -63,6 +63,8 @@ public class HBaseObjectDatabase implements ObjectDatabase {
     // private HConnection connection;
     
     protected ConfigDatabase config;
+    
+    protected Configuration hbConfig;
 
     private HBaseAdmin client = null;
     
@@ -112,7 +114,7 @@ public class HBaseObjectDatabase implements ObjectDatabase {
         
         // String uri = config.get("hbase.uri").get();
         String database = config.get("hbase.database").get();
-        Configuration hbConfig = HBaseConfiguration.create();
+        hbConfig = HBaseConfiguration.create();
         // hbConfig.set("someValue", uri);
         
         try {
@@ -171,11 +173,13 @@ public class HBaseObjectDatabase implements ObjectDatabase {
     public void close() {
         if (client != null) {
             try {
+                table.close();
                 client.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
+        table = null;
         client = null;
     }
 
@@ -393,6 +397,20 @@ public class HBaseObjectDatabase implements ObjectDatabase {
     @Override
     public long deleteAll(Iterator<ObjectId> ids) {
         return deleteAll(ids, BulkOpListener.NOOP_LISTENER);
+    }
+    
+    public HTable getCollection(String tableName, String[] columnFamilies) throws IOException {
+        if (client.tableExists(tableName)) {
+            // table 'tableName' already exists
+        }else{
+            HTableDescriptor tableDesc = new HTableDescriptor(tableName);
+            for (String columnFamily : columnFamilies) {
+                tableDesc.addFamily(new HColumnDescriptor(columnFamily));
+            }
+            client.createTable(tableDesc);
+        }
+        
+        return new HTable(hbConfig, tableName);
     }
 
     @Override
