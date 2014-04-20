@@ -9,6 +9,7 @@ import com.google.inject.Injector;
 import com.google.inject.util.Modules;
 
 public class HbaseRevTreeBuilderPerformanceTest extends RevTreeBuilderPerformanceTest {
+	 @Override
 	 protected Injector createInjector() {
 	        return Guice.createInjector(Modules.override(new GeogitModule())
 	        		.with(new HbaseTestStorageModule()));
