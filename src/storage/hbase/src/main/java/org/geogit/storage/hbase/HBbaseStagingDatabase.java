@@ -81,7 +81,7 @@ public class HBbaseStagingDatabase extends ForwardingStagingDatabase implements 
         }
         
         Get get = new Get(Bytes.toBytes(rowkey));
-        get.addFamily(Bytes.toBytes("path"));
+        get.addColumn(Bytes.toBytes("path"), Bytes.toBytes(""));
         Scan s = new Scan(get);
         ResultScanner scanner = null;
         
@@ -92,10 +92,14 @@ public class HBbaseStagingDatabase extends ForwardingStagingDatabase implements 
         }
         
         for (Result rr : scanner) {
-            ObjectId ancestor = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ancestor"), Bytes.toBytes(""))) );
-            ObjectId ours = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ours"), Bytes.toBytes(""))) );
-            ObjectId theirs = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("theirs"), Bytes.toBytes(""))) );
-            return Optional.of(new Conflict(path, ancestor, ours, theirs));
+            String getPath = new String(rr.getValue(Bytes.toBytes("path"), Bytes.toBytes("")));
+            
+            if( getPath.equals(path) ){
+                ObjectId ancestor = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ancestor"), Bytes.toBytes(""))) );
+                ObjectId ours = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("ours"), Bytes.toBytes(""))) );
+                ObjectId theirs = ObjectId.valueOf( new String(rr.getValue(Bytes.toBytes("theirs"), Bytes.toBytes(""))) );
+                return Optional.of(new Conflict(path, ancestor, ours, theirs));
+            }
         }
         
         return Optional.absent();
@@ -158,6 +162,15 @@ public class HBbaseStagingDatabase extends ForwardingStagingDatabase implements 
         if( namespace == null ){
             rowkey = "0";
         }
+        
+        // delete if 'rowkey' already exists
+        Delete del = new Delete(Bytes.toBytes(rowkey));
+        try {
+            conflicts.delete(del);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        
         // set namespace as rowKey when put
         Put p = new Put(Bytes.toBytes(rowkey));
         // no qualifier
@@ -179,9 +192,9 @@ public class HBbaseStagingDatabase extends ForwardingStagingDatabase implements 
         if( namespace == null ){
             rowkey = "0";
         }
-        
+
         Delete del = new Delete(Bytes.toBytes(rowkey));
-        del.deleteColumn(Bytes.toBytes(path), Bytes.toBytes(""));
+        del.deleteColumn(Bytes.toBytes("path"), Bytes.toBytes(""));
         
         try {
             conflicts.delete(del);
